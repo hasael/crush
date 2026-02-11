@@ -24,6 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -1927,12 +1928,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++ // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y
-			// Offset for attachment row if present.
-			if len(m.attachments.List()) > 0 {
-				cur.Y++
-			}
+			cur.X++                            // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
 			return cur
 		}
 	}
@@ -2222,7 +2219,10 @@ func (m *UI) updateSize() {
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.SetWidth(m.layout.editor.Dx())
-	m.textarea.SetHeight(m.layout.editor.Dy())
+	// TODO: Abstract the textarea and attachments into a single editor
+	// component so we don't have to manually account for the attachments
+	// height here.
+	m.textarea.SetHeight(m.layout.editor.Dy() - 2) // Account for top margin/attachments and bottom margin
 	m.renderPills()
 
 	// Handle different app states
@@ -2372,14 +2372,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
 		}
-	}
-
-	if !uiLayout.editor.Empty() {
-		// Add editor margins 1 top and bottom
-		if len(m.attachments.List()) == 0 {
-			uiLayout.editor.Min.Y += 1
-		}
-		uiLayout.editor.Max.Y -= 1
 	}
 
 	return uiLayout
@@ -2685,14 +2677,15 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	if len(m.attachments.List()) == 0 {
-		return m.textarea.View()
+	var attachmentsView string
+	if len(m.attachments.List()) > 0 {
+		attachmentsView = m.attachments.Render(width)
 	}
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		m.attachments.Render(width),
+	return strings.Join([]string{
+		attachmentsView,
 		m.textarea.View(),
-	)
+		"", // margin at bottom of editor
+	}, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -2986,6 +2979,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
+	agenttools.ResetCache()
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.App.LSPManager.StopAll(context.Background())
