@@ -76,3 +76,130 @@ func TestYourFunction(t *testing.T) {
 
 ## Working on the TUI (UI)
 Anytime you need to work on the tui before starting work read the internal/ui/AGENTS.md file
+
+## Project Architecture
+
+Crush is a CLI-based AI coding assistant built with Go and Bubbletea.
+
+### Key Components
+
+- **`internal/agent/`** - Core AI agent orchestration
+  - `agent.go` - Main session agent implementation
+  - `coordinator.go` - Agent coordination and tool management
+  - `tools/` - Tool implementations (bash, edit, view, multiedit, etc.)
+  - `prompts.go` - Prompt template functions for coder/task/initialize agents
+  - Two agent types: `coder` (main agent) and `task` (sub-agent for tool use)
+
+- **`internal/ui/`** - Bubbletea-based terminal UI
+  - `model/ui.go` - Main UI model with message routing
+  - `model/chat.go` - Chat message display and interaction
+  - `diffview/` - Unified/split diff viewing with syntax highlighting
+  - `dialog/` - Dialog implementations (models, sessions, permissions, etc.)
+
+- **`internal/config/`** - Configuration management
+  - Uses Catwalk (charm.land/catwalk) for provider/model definitions
+  - Provider auto-update from remote Catwalk service
+  - Embedded providers as fallback
+  - Environment variable expansion: `$(echo $VAR)` syntax
+
+- **`internal/lsp/`** - Language Server Protocol client management
+  - Manages LSP server lifecycles (start/stop/restart)
+  - Diagnostic caching and change notifications
+  - Used for code context and error information
+
+- **`internal/shell/`** - Cross-platform shell execution
+  - Uses `mvdan.cc/sh/v3` for POSIX shell emulation on all platforms
+  - **IMPORTANT**: Use forward slashes `/` for paths on all platforms including Windows
+  - Background job management for long-running commands
+  - Command blocking for security (e.g., `curl`, `rm`, etc.)
+
+- **`internal/permission/`** - Permission system
+  - Users must approve tool executions (bash, edit, etc.)
+  - `--yolo` flag auto-approves all permissions (dangerous)
+  - `permissions.allowed_tools` config for pre-approved tools
+
+- **`internal/agent/tools/mcp/`** - Model Context Protocol support
+  - Supports `stdio`, `http`, and `sse` transport types
+  - MCP servers can provide additional tools and resources
+  - Tools from MCPs are integrated into the agent tool set
+
+- **`internal/db/`** - SQLite database
+  - Uses sqlc for type-safe SQL queries
+  - Migrations in `internal/db/migrations/`
+  - Stores sessions, messages, todos, read files
+
+- **`internal/session/`** - Session management
+  - Session-based conversations with parent-child relationships
+  - Title generation sessions for naming
+  - Task sessions for sub-agent tool calls
+  - Token usage and cost tracking
+
+- **`internal/message/`** - Message storage
+  - Multi-part messages (text, images, tool calls, etc.)
+  - Summary message support for long conversations
+
+### Configuration Files
+
+Priority order:
+1. `.crush.json` (project root)
+2. `crush.json` (project root)
+3. `$HOME/.config/crush/crush.json` (global)
+
+Default context paths searched:
+- `.github/copilot-instructions.md`
+- `.cursorrules`, `.cursor/rules/`
+- `CLAUDE.md`, `CLAUDE.local.md`
+- `AGENTS.md`, `agents.md`, `Agents.md`
+- etc.
+
+### Agent Types
+
+- **Coder Agent** (`AgentCoder`): Main agent for coding tasks
+  - Reads files, edits code, runs tests, searches code
+  - Uses large model for reasoning, small model for summaries
+
+- **Task Agent** (`AgentTask`): Sub-agent for delegated tasks
+  - Spawned via the `agent` tool
+  - Simplified prompt for concise responses
+
+- **Initialize Agent**: Creates project context files (AGENTS.md)
+  - Analyzes codebase structure
+  - Documents build commands, patterns, conventions
+
+### Tools System
+
+Tools are defined in `internal/agent/tools/`:
+- `bash.go` - Execute shell commands (with security blocking)
+- `edit.go` - Find/replace in files (exact match required)
+- `multiedit.go` - Multiple sequential edits in one operation
+- `write.go` - Create/overwrite files
+- `view.go` - Read file contents with line numbers
+- `grep.go` - Search file contents
+- `glob.go` - Find files by pattern
+- `ls.go` - List directory contents
+- `web_search.go` - Search the web via DuckDuckGo
+- `fetch.go` - Fetch raw content from URLs
+- `agentic_fetch_tool.go` - Web search + AI analysis
+- `mcp/` - MCP server integration for external tools
+
+### VCR Testing
+
+Tests use `charm.land/x/vcr` for HTTP recording:
+- Cassettes stored in `internal/agent/testdata/`
+- Update cassettes: `task test:record` or `go test -v -count=1 ./internal/agent`
+- Each model provider has its own cassette directory
+
+### LSP Integration
+
+LSP clients are managed per-language:
+- Defined in config `lsp` section
+- Example: `gopls`, `typescript-language-server`, `nil`
+- Can be restarted via `lsp_restart` tool
+- Diagnostics integrated into editor view
+
+### Cross-Platform Notes
+
+- Shell execution is POSIX-emulated on all platforms
+- Path handling: always use forward slashes `/`
+- File permissions use octal notation (0o755, 0o644)
+- Tests may skip on Windows (check for `runtime.GOOS == "windows"`)
